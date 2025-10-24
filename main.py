@@ -4,8 +4,8 @@ import discord
 from discord.ext import tasks
 from dotenv import load_dotenv
 import aiohttp
-import aiohttp.web as web
 from aiohttp import web
+import asyncio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,8 +68,14 @@ async def start_server():
     logger.info(f"🔄 HTTP-сервер запущен на порту {port}")
 
 async def main():
-    await start_server()
-    await bot.start(TOKEN)
+    try:
+        async with aiohttp.ClientSession() as session:  # Создаём сессию для aiohttp
+            await asyncio.gather(
+                start_server(),
+                bot.start(TOKEN)
+            )
+    except Exception as e:
+        logger.error(f"Ошибка запуска: {e}")
 
 if __name__ == "__main__":
-    bot.loop.run_until_complete(main())
+    asyncio.run(main())
