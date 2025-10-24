@@ -8,7 +8,7 @@ from aiohttp import web
 import asyncio
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
@@ -40,11 +40,28 @@ async def keep_alive():
         if not isinstance(channel, discord.VoiceChannel):
             logger.error("❌ Канал не найден")
             return
-        if not voice_client or not voice_client.is_connected():
-            voice_client = await channel.connect(reconnect=True)
-            logger.info(f"✅ Подключён к {channel.name}")
-        else:
+        
+        logger.debug(f"Состояние voice_client: {voice_client}, подключён: {voice_client.is_connected() if voice_client else False}")
+        
+        if voice_client and voice_client.is_connected():
             logger.info(f"🔄 Уже в канале {channel.name}")
+            return
+        
+        if voice_client:
+            try:
+                await voice_client.disconnect(force=True)
+                logger.info("🔌 Отключён старый voice_client")
+            except Exception as e:
+                logger.error(f"Ошибка при отключении старого voice_client: {e}")
+            voice_client = None
+
+        voice_client = await channel.connect(reconnect=True)
+        logger.info(f"✅ Подключён к {channel.name}")
+    except discord.errors.ConnectionClosed as e:
+        logger.error(f"Ошибка WebSocket: {e}. Повторная попытка через 5 секунд...")
+        await asyncio.sleep(5)
+        voice_client = None
+        await keep_alive()
     except Exception as e:
         logger.error(f"Ошибка: {e}")
 
@@ -62,14 +79,15 @@ async def start_server():
     app.router.add_get('/', handle_keepalive)
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.getenv('PORT', 8080))
+    port = int(os.getenv('PORT', 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     logger.info(f"🔄 HTTP-сервер запущен на порту {port}")
 
 async def main():
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+            bot.session = session
             await asyncio.gather(
                 start_server(),
                 bot.start(TOKEN)
