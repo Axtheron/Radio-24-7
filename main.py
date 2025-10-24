@@ -69,7 +69,7 @@ async def start_server():
 
 async def main():
     try:
-        async with aiohttp.ClientSession() as session:  # Создаём сессию для aiohttp
+        async with aiohttp.ClientSession() as session:
             await asyncio.gather(
                 start_server(),
                 bot.start(TOKEN)
