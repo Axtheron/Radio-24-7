@@ -1,66 +1,75 @@
 import os
 import logging
-import asyncio
-from datetime import datetime
-from discord.ext import commands, tasks
-from dotenv import load_dotenv
 import discord
+from discord.ext import tasks
+from dotenv import load_dotenv
+import aiohttp
+import aiohttp.web as web
+from aiohttp import web
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
-logger = logging.getLogger("StableAudioBot")
+logger = logging.getLogger("Bot")
 
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
-VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID", 0))
+VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID", "0"))
 
 if not TOKEN:
-    logger.critical("❌ Discord TOKEN не найден в .env")
+    logger.critical("❌ Discord TOKEN не найден")
     exit(1)
 if not VOICE_CHANNEL_ID:
-    logger.critical("❌ VOICE_CHANNEL_ID не найден в .env")
+    logger.critical("❌ VOICE_CHANNEL_ID не найден")
     exit(1)
 
 intents = discord.Intents.default()
 intents.guilds = True
 intents.voice_states = True
 
-bot = commands.Bot(command_prefix="/", intents=intents)
-voice_client: discord.VoiceClient | None = None
-
-async def get_voice_channel() -> discord.VoiceChannel | None:
-    channel = bot.get_channel(VOICE_CHANNEL_ID)
-    if isinstance(channel, discord.VoiceChannel):
-        return channel
-    logger.error("❌ Голосовой канал не найден")
-    return None
+bot = discord.Client(intents=intents)
+voice_client = None
 
 @tasks.loop(minutes=10)
-async def keep_alive_loop():
+async def keep_alive():
     global voice_client
     try:
-        channel = await get_voice_channel()
-        if not channel:
+        channel = bot.get_channel(VOICE_CHANNEL_ID)
+        if not isinstance(channel, discord.VoiceChannel):
+            logger.error("❌ Канал не найден")
             return
         if not voice_client or not voice_client.is_connected():
             voice_client = await channel.connect(reconnect=True)
-            logger.info(f"🔄 Подключён к голосовому каналу: {channel.name}")
+            logger.info(f"✅ Подключён к {channel.name}")
         else:
-            logger.info(f"✅ Бот уже в канале: {channel.name}")
+            logger.info(f"🔄 Уже в канале {channel.name}")
     except Exception as e:
-        logger.error(f"Ошибка в keep_alive_loop: {e}")
+        logger.error(f"Ошибка: {e}")
 
 @bot.event
 async def on_ready():
-    logger.info(f"✅ Бот {bot.user} онлайн с {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    if not keep_alive_loop.is_running():
-        keep_alive_loop.start()
+    logger.info(f"✅ Бот {bot.user} готов")
+    if not keep_alive.is_running():
+        keep_alive.start()
+
+async def handle_keepalive(request):
+    return web.Response(text="Bot is alive!")
+
+async def start_server():
+    app = web.Application()
+    app.router.add_get('/', handle_keepalive)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv('PORT', 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"🔄 HTTP-сервер запущен на порту {port}")
+
+async def main():
+    await start_server()
+    await bot.start(TOKEN)
 
 if __name__ == "__main__":
-    try:
-        bot.run(TOKEN, reconnect=True)
-    except Exception as e:
-        logger.critical(f"❌ Ошибка запуска бота: {e}")
+    bot.loop.run_until_complete(main())
